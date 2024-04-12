@@ -3,6 +3,10 @@ local build = require "plugins.build"
 
 local make = { }
 
+function make.supported(target)
+  return system.get_file_info((target.wd or ".") .. PATHSEP .. "Makefile") ~= nil
+end
+
 local function grep(t, cond) local nt = {} for i,v in ipairs(t) do if cond(v, i) then table.insert(nt, v) end end return nt end
 function make.build(target, callback)
   build.run_tasks({ { "make", target.name, "-j", build.threads } }, function(status)

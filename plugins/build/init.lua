@@ -207,10 +207,27 @@ function build.set_target(target)
   build.state.target = target
   save_state()
 end
+local backends = nil
+
+function build.infer_backend(target)
+  if not backends then
+    backends = {}
+    local directory = get_plugin_directory()
+    for i,v in ipairs(system.list_dir(directory .. PATHSEP .. "backends")) do
+      local backend = require("plugins.build.backends." .. v:gsub("%.lua", ""))
+      table.insert(backends, backend)
+    end
+  end
+  for i,backend in ipairs(backends) do
+    if backend.supported(target) then return backend end
+  end
+end
 
 function build.set_targets(targets, type)
   build.targets = targets
-  for i,v in ipairs(targets) do v.backend = require("plugins.build." .. (type or "internal")) end
+  for i,v in ipairs(targets) do
+    v.backend = build.infer_backend(v)
+  end
   config.target_binary = build.targets[1].binary
 end
 
@@ -221,7 +238,6 @@ function build.build(callback)
   build.message_view.visible = true
   local target = build.current_target
   build.message_view:add_message("Building " .. (build.targets[target].binary or "target") .. "...")
-  build.message_view.minimized = false
   local status, err = pcall(function()
     if not build.targets[target] then error("Can't find target " .. target) end
     if not build.targets[target].backend then error("Can't find target " .. target .. " backend.") end
@@ -231,7 +247,7 @@ function build.build(callback)
       build.message_view.visible = status ~= 0 or build.on_success ~= "close"
       build.output(line)
       build.message_view.scroll.to.y = 0
-      if status == 0 and build.on_success == "minimize" then build.message_view.minimized = true end
+      --if status == 0 and build.on_success == "minimize" then build.message_view.minimized = true end
     end)
   end)
   if not status then build.message_view:add_message({ "error", err }) end
@@ -290,11 +306,10 @@ function build.clean(callback)
   build.message_view:clear_messages()
   local target = build.current_target
   build.message_view.visible = true
-  build.message_view.minimized = false
   build.message_view:add_message("Started clean " .. (build.targets[build.current_target].binary or "target") .. ".")
   build.targets[build.current_target].backend.clean(build.targets[build.current_target], function(...)
     build.message_view:add_message({ "good", "Completed cleaning " .. (build.targets[build.current_target].binary or "target") .. "." })
-    if build.on_success == "minimize" then build.message_view.minimized = true end
+    --if build.on_success == "minimize" then build.message_view.minimized = true end
     if callback then callback(...) end
   end)
 end
@@ -378,30 +393,20 @@ function BuildMessageView:new()
   BuildMessageView.super.new(self)
   self.messages = { }
   self.target_size = build.drawer_size
-  self.minimized = false
+  self.size.y = 200
   self.scrollable = true
   self.init_size = true
   self.hovered_message = nil
-  self.visible = false
   self.active_message = nil
   self.active_file = nil
   self.active_line = nil
 end
 
-function BuildMessageView:update()
-  local dest = self.visible and ((self.minimized and style.code_font:get_height() + style.padding.y * 2) or self.target_size) or 0
-  if self.init_size then
-    self.size.y = dest
-    self.init_size = false
-  else
-    self:move_towards(self.size, "y", dest)
-  end
-  BuildMessageView.super.update(self)
-end
 
 function BuildMessageView:set_target_size(axis, value)
   if axis == "y" then
     self.target_size = value
+    self.size.y = value
     return true
   end
 end
@@ -523,6 +528,7 @@ local BuildBarView = ToolbarView:extend()
 
 function BuildBarView:new()
   BuildBarView.super.new(self)
+  self.size.y = 32
   self.toolbar_font = renderer.font.load(get_plugin_directory() .. PATHSEP .. "build.ttf", style.icon_big_font:get_size())
   self.toolbar_commands = {
     {symbol = "!", command = "build:build"},
@@ -534,12 +540,9 @@ function BuildBarView:new()
   }
 end
 
-build.build_bar_view = BuildBarView()
-build.message_view = BuildMessageView()
-local node = core.root_view:get_active_node()
-build.message_view_node = node:split("down", build.message_view, { y = true }, true)
-build.build_bar_node = TreeView.node.b:split("up", build.build_bar_view, {y = true})
 
+core.root_view.pockets.left:add_view(BuildBarView(), "vsplit")
+build.message_view = core.root_view.pockets.bottom:add_view(BuildMessageView())
 
 local function argument_string_to_table(str)
   local s = str:find("%S")
@@ -595,14 +598,6 @@ core.status_view:add_item({
         end
       end
     })
-  end
-})
-
-command.add(function(x, y)
-  return core.active_view and core.active_view:is(BuildMessageView) and build.message_view.visible and (y == nil or y <= build.message_view.position.y + style.padding.y * 2 + style.code_font:get_height())
-end, {
-  ["build:toggle-minimize"] = function()
-    build.message_view.minimized = not build.message_view.minimized
   end
 })
 
@@ -721,7 +716,6 @@ keymap.add {
   ["ctrl+shift+e"]       = "build:run-or-term-or-kill-with-arguments",
   ["ctrl+t"]             = "build:next-target",
   ["ctrl+shift+b"]       = "build:clean",
-  ["f6"]                 = "build:toggle-drawer",
   ["escape"]             = "build:contextual-close-drawer"
 }
 

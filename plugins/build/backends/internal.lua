@@ -24,6 +24,10 @@ local internal = common.merge({
   interval = 0.1
 }, config.plugins.build.internal)
 
+function internal.supported(target)
+  return target.srcs ~= nil
+end
+
 local function split(str, splitter)
   local t = {}
   local s = 1
@@ -50,7 +54,7 @@ local function get_cxxflags(target, path) return get_field(target, path, "cxxfla
 local function get_type(target) return get_field(target, nil, "type") end
 local function get_ldflags(target) return get_field(target, nil, "ldflags") end
 local function get_binary(target) return get_field(target, nil, "binary") end
-local function get_compiler(target, path) 
+local function get_compiler(target, path)
   if not path then return get_field(target, path, "cc") end
   if path:find("^/") ~= 1 then
     if target.srcs then
@@ -80,7 +84,7 @@ local function get_source_files(target)
   for dir_name, file in core.get_project_files() do
     local src = file.filename
     if dir_name == core.project_dir and file.type == "file" then
-      local compiler = get_compiler(target, src) 
+      local compiler = get_compiler(target, src)
       if compiler then table.insert(files, src) end
     end
   end
@@ -145,7 +149,7 @@ function internal.build(target, callback)
       if compile then
         table.insert(compile_jobs, table_concat(get_compiler(target, files[i]), { "-fdiagnostics-color=always", "-c", files[i], "-o", objects[i], table.unpack(get_compile_flags(target, files[i])) }))
       end
-    end 
+    end
     build.run_tasks(compile_jobs, function(status)
       if status ~= 0 then if callback then callback(status) end return end
       local link_job = {}
